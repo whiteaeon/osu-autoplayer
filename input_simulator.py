@@ -101,8 +101,9 @@ class InputSimulator:
     def move_cursor(self, x: float, y: float) -> None:
         """
         Move cursor to position (x, y) in game coordinates (0-512, 0-384).
-        Converts to screen coordinates assuming 1920x1440 resolution.
+        Uses Windows SetCursorPos for pixel-accurate positioning (DPI-aware).
         """
+        import ctypes
         screen_x, screen_y = self._game_to_screen_coords(x, y)
         # Debug: print first few moves
         import sys
@@ -111,7 +112,8 @@ class InputSimulator:
         sys._osu_move_count += 1
         if sys._osu_move_count <= 5:
             print(f"[input] Move: game({x:.1f}, {y:.1f}) -> screen({screen_x}, {screen_y})")
-        pydirectinput.moveTo(screen_x, screen_y, duration=0)
+        # SetCursorPos bypasses pydirectinput's possible scaling issues
+        ctypes.windll.user32.SetCursorPos(screen_x, screen_y)
 
     def click(self) -> None:
         """Single mouse click (press and immediately release)."""
@@ -129,30 +131,54 @@ class InputSimulator:
         """
         Convert osu! game coordinates (0-512, 0-384) to screen pixels.
 
-        For fullscreen osu!, we need to know the actual monitor resolution.
+        Uses DESKTOPHORZRES/DESKTOPVERTRES to get the actual physical
+        monitor resolution, bypassing DPI scaling.
         """
-        # Try to get the primary monitor's actual resolution
         try:
             import ctypes
+            # Make process DPI aware so we get real pixel coordinates
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-monitor v2
+            except:
+                try:
+                    ctypes.windll.user32.SetProcessDPIAware()
+                except:
+                    pass
 
-            # Get the monitor info for the primary display
             hdc = ctypes.windll.user32.GetDC(0)
-
-            # HORZRES = physical width, VERTRES = physical height
-            screen_width = ctypes.windll.gdi32.GetDeviceCaps(hdc, 8)    # HORZRES
-            screen_height = ctypes.windll.gdi32.GetDeviceCaps(hdc, 10)   # VERTRES
-
+            # DESKTOPHORZRES (118) / DESKTOPVERTRES (117) = physical pixels
+            # HORZRES (8) / VERTRES (10) = DPI-scaled (wrong for our purposes)
+            screen_width = ctypes.windll.gdi32.GetDeviceCaps(hdc, 118)
+            screen_height = ctypes.windll.gdi32.GetDeviceCaps(hdc, 117)
             ctypes.windll.user32.ReleaseDC(0, hdc)
 
             if screen_width <= 0 or screen_height <= 0:
                 raise Exception("Invalid resolution")
         except:
-            # Fallback: use common resolution
             screen_width = 1920
             screen_height = 1200
 
-        screen_x = int(gx * screen_width / 512)
-        screen_y = int(gy * screen_height / 384)
+        # osu! playfield is centered with aspect ratio 4:3 (512:384)
+        # In fullscreen, it's letterboxed if screen ratio differs
+        # Standard osu! playfield occupies the center with margins
+        screen_ratio = screen_width / screen_height
+        playfield_ratio = 512.0 / 384.0  # 4:3 = 1.333
+
+        if screen_ratio > playfield_ratio:
+            # Screen wider than 4:3 (e.g. 16:9, 16:10) - letterbox left/right
+            playfield_h = screen_height * 0.8  # osu! uses 80% of screen height
+            playfield_w = playfield_h * playfield_ratio
+        else:
+            # Screen taller than 4:3 - letterbox top/bottom
+            playfield_w = screen_width * 0.8
+            playfield_h = playfield_w / playfield_ratio
+
+        # Center the playfield
+        offset_x = (screen_width - playfield_w) / 2
+        offset_y = (screen_height - playfield_h) / 2
+
+        screen_x = int(offset_x + gx * playfield_w / 512)
+        screen_y = int(offset_y + gy * playfield_h / 384)
         return (screen_x, screen_y)
 
     def __repr__(self) -> str:
