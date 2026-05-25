@@ -167,17 +167,20 @@ class OsuMemory:
             self._time_address   = self._scan(*_SIG_TIME)
             self._player_pointer = self._scan(*_SIG_PLAYER)
             self._status_pointer = self._scan(*_SIG_STATUS)
+            print(
+                f"[memory] Ready  "
+                f"time={self._time_address:#010x}  "
+                f"player_ptr={self._player_pointer:#010x}  "
+                f"status={self._status_pointer:#010x}"
+            )
+            return True
         except RuntimeError as exc:
-            print(f"[memory] Scan failed: {exc}")
-            return False
-
-        print(
-            f"[memory] Ready  "
-            f"time={self._time_address:#010x}  "
-            f"player_ptr={self._player_pointer:#010x}  "
-            f"status={self._status_pointer:#010x}"
-        )
-        return True
+            # For osu!lazer, signatures might not match.
+            # In hybrid mode, we don't strictly need memory offsets.
+            print(f"[memory] Warning: Signature scan failed: {exc}")
+            print("[memory] This is normal for osu!lazer. Using hybrid mode (file-based hits).")
+            print("[memory] Note: Game timing sync will be limited without memory access.")
+            return True  # Return True anyway — hybrid mode can work without memory
 
     # ------------------------------------------------------------------
     # Scanning
@@ -250,10 +253,18 @@ class OsuMemory:
     # ------------------------------------------------------------------
     def get_game_time(self) -> int:
         """Current song position in milliseconds (osu!'s internal clock)."""
+        if self._time_address == 0:
+            # Fallback for lazer: return system time (not ideal, but allows hybrid mode to work)
+            if not hasattr(self, '_play_start_time'):
+                self._play_start_time = time.perf_counter()
+            return int((time.perf_counter() - self._play_start_time) * 1000)
         return self._int(self._time_address)
 
     def get_status(self) -> int:
         """Game state: 0=menu, 2=playing, 5=song select."""
+        if self._status_pointer == 0:
+            # Fallback for lazer: assume playing if we're in this loop
+            return STATUS_PLAYING
         return self._int(self._status_pointer)
 
     def is_playing(self) -> bool:
