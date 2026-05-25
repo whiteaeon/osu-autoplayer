@@ -101,7 +101,8 @@ class InputSimulator:
     def move_cursor(self, x: float, y: float) -> None:
         """
         Move cursor to position (x, y) in game coordinates (0-512, 0-384).
-        Uses Windows SetCursorPos for pixel-accurate positioning (DPI-aware).
+        Uses SendInput with MOUSEEVENTF_ABSOLUTE to generate synthesized
+        mouse events that lazer will pick up (even with raw input enabled).
         """
         import ctypes
         screen_x, screen_y = self._game_to_screen_coords(x, y)
@@ -112,20 +113,36 @@ class InputSimulator:
         sys._osu_move_count += 1
         if sys._osu_move_count <= 5:
             print(f"[input] Move: game({x:.1f}, {y:.1f}) -> screen({screen_x}, {screen_y})")
-        # SetCursorPos bypasses pydirectinput's possible scaling issues
+
+        # Use SendInput with normalized absolute coordinates (0-65535)
+        # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE = 0x0001 | 0x8000
+        # Plus also call SetCursorPos for redundancy
+        screen_width = ctypes.windll.user32.GetSystemMetrics(0)
+        screen_height = ctypes.windll.user32.GetSystemMetrics(1)
+        # Normalize to 0-65535 range
+        nx = int(screen_x * 65535 / max(screen_width, 1))
+        ny = int(screen_y * 65535 / max(screen_height, 1))
+        # mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0)
+        ctypes.windll.user32.mouse_event(0x0001 | 0x8000, nx, ny, 0, 0)
+        # Also call SetCursorPos as backup
         ctypes.windll.user32.SetCursorPos(screen_x, screen_y)
 
     def click(self) -> None:
-        """Single mouse click (press and immediately release)."""
-        pydirectinput.click()
+        """Single mouse click using SendInput (lazer-compatible)."""
+        import ctypes
+        # MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
+        ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)
+        ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
 
     def mouse_down(self) -> None:
-        """Press mouse button down (for slider holds)."""
-        pydirectinput.mouseDown()
+        """Press mouse button down using SendInput."""
+        import ctypes
+        ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)
 
     def mouse_up(self) -> None:
-        """Release mouse button."""
-        pydirectinput.mouseUp()
+        """Release mouse button using SendInput."""
+        import ctypes
+        ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
 
     def _game_to_screen_coords(self, gx: float, gy: float) -> tuple[int, int]:
         """
