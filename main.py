@@ -31,6 +31,7 @@ from typing import List
 
 from osu_memory import OsuMemory, HitObject, HitObjectStandard
 from osu_parser import get_hit_objects_from_map, OsuHitObject, parse_osu_file, get_game_mode
+from lazer_detect import get_current_beatmap_file, get_osu_window_title, wait_for_gameplay_start
 from input_simulator import InputSimulator
 
 # ---------------------------------------------------------------------------
@@ -773,26 +774,19 @@ def main() -> None:
                         time.sleep(1.0)
                         continue
                 else:
-                    # Auto-detect: scan for .osu files matching standard mode
-                    songs_dir = "D:\\gms\\osu!\\Songs"
-                    for root, dirs, files in os.walk(songs_dir):
-                        for file in files:
-                            if file.endswith(".osu"):
-                                full_path = os.path.join(root, file)
-                                # Only load standard mode maps
-                                if get_game_mode(full_path) != "standard":
-                                    continue
-                                objs = parse_osu_file(full_path)
-                                if objs:  # Use first valid map file found
-                                    parsed_objects = objs
-                                    map_file = full_path
-                                    break
-                        if parsed_objects:
-                            break
+                    # Auto-detect via window title (works with lazer)
+                    detected_file = get_current_beatmap_file("D:\\gms\\osu!\\Songs")
+                    if detected_file:
+                        if get_game_mode(detected_file) != "standard":
+                            print(f"[main] Map is not standard mode, waiting...")
+                            time.sleep(1.0)
+                            continue
+                        parsed_objects = parse_osu_file(detected_file)
+                        map_file = detected_file
 
                 if not parsed_objects:
-                    print("[main] No valid standard mode .osu files found - waiting...")
-                    print("[main] Tip: Use --map /path/to/file.osu to specify a map")
+                    print("[main] No standard mode map detected - waiting...")
+                    print("[main] Tip: Make sure osu! is showing a standard map, or use --map")
                     time.sleep(1.0)
                     continue
 
@@ -847,10 +841,12 @@ def main() -> None:
                 )
 
                 print(f"[main] Ready to play {len(actions)} actions")
-                print("[main] *** Press ENTER in osu! when the map starts to sync timing ***")
-                input("[main] Press ENTER here to start autoplayer: ")
-                mem.reset_play_clock()  # Reset system clock for new session
-                play(mem, actions, sim, mode="standard")
+                # Auto-detect when gameplay starts via CPU monitoring
+                if wait_for_gameplay_start(timeout=60.0):
+                    mem.reset_play_clock()  # Sync clock to gameplay start
+                    play(mem, actions, sim, mode="standard")
+                else:
+                    print("[main] No gameplay detected, skipping...")
                 print("[main] Map ended.\n")
                 time.sleep(1.0)
 
@@ -869,26 +865,19 @@ def main() -> None:
                         time.sleep(1.0)
                         continue
                 else:
-                    # Auto-detect: scan for .osu files matching mania mode
-                    songs_dir = "D:\\gms\\osu!\\Songs"
-                    for root, dirs, files in os.walk(songs_dir):
-                        for file in files:
-                            if file.endswith(".osu"):
-                                full_path = os.path.join(root, file)
-                                # Only load mania mode maps
-                                if get_game_mode(full_path) != "mania":
-                                    continue
-                                objs = parse_osu_file(full_path, mode="mania")
-                                if objs:  # Use first valid map file found
-                                    parsed_objects = objs
-                                    map_file = full_path
-                                    break
-                        if parsed_objects:
-                            break
+                    # Auto-detect via window title (works with lazer)
+                    detected_file = get_current_beatmap_file("D:\\gms\\osu!\\Songs")
+                    if detected_file:
+                        if get_game_mode(detected_file) != "mania":
+                            print(f"[main] Map is not mania mode, waiting...")
+                            time.sleep(1.0)
+                            continue
+                        parsed_objects = parse_osu_file(detected_file, mode="mania")
+                        map_file = detected_file
 
                 if not parsed_objects:
-                    print("[main] No valid mania .osu files found - waiting...")
-                    print("[main] Tip: Use --map /path/to/file.osu to specify a map")
+                    print("[main] No mania map detected - waiting...")
+                    print("[main] Tip: Make sure osu! is showing a mania map, or use --map")
                     time.sleep(1.0)
                     continue
 
@@ -975,11 +964,12 @@ def main() -> None:
                     print(f"[main] break-taps:  {actions_before} actions -> {actions_after} actions")
 
                 print(f"[main] Ready to play {len(actions)} actions")
-                print("[main] *** Press ENTER in osu! when the map starts to sync timing ***")
-                input("[main] Press ENTER here to start autoplayer: ")
-                mem.reset_play_clock()  # Reset system clock for new session
-
-                play(mem, actions, sim, mode="mania")
+                # Auto-detect when gameplay starts via CPU monitoring
+                if wait_for_gameplay_start(timeout=60.0):
+                    mem.reset_play_clock()  # Sync clock to gameplay start
+                    play(mem, actions, sim, mode="mania")
+                else:
+                    print("[main] No gameplay detected, skipping...")
 
                 print("[main] Map ended.\n")
                 time.sleep(1.0)
