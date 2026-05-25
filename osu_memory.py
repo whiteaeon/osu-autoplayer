@@ -271,6 +271,10 @@ class OsuMemory:
 
     def get_hit_objects(self) -> List[HitObject]:
         """
+        DEPRECATED: For lazer, use osu_parser.py instead.
+        This reads from memory (stable-only), but hit objects are better read from .osu files.
+        """
+        """
         Read all hit objects for the current beatmap directly from memory.
 
         Memory chain (internal.h → map_player → hit_manager → list_container):

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import List
 
 from osu_memory import OsuMemory, HitObject, HitObjectStandard
-from osu_parser import get_hit_objects_from_map, OsuHitObject
+from osu_parser import get_hit_objects_from_map, OsuHitObject, parse_osu_file
 from input_simulator import InputSimulator
 
 # ---------------------------------------------------------------------------
@@ -848,32 +848,65 @@ def main() -> None:
                 print("[main] Map ended.\n")
                 time.sleep(1.0)
 
-            else:  # mania mode (default)
-                col_count_mem = mem.get_column_count()
-                objects       = mem.get_hit_objects()
+            else:  # mania mode (default) - HYBRID: parse .osu file, use memory only for timing
+                # Parse .osu file for mania mode
+                parsed_objects = []
+                map_file = ""
 
-                if not objects:
-                    print("[main] No hit objects in memory - waiting...")
+                if args.map:
+                    # Use specified map file
+                    if os.path.exists(args.map):
+                        parsed_objects = parse_osu_file(args.map, mode="mania")
+                        map_file = args.map
+                    else:
+                        print(f"[main] Map file not found: {args.map}")
+                        time.sleep(1.0)
+                        continue
+                else:
+                    # Auto-detect: scan for .osu files
+                    songs_dir = "D:\\gms\\osu!\\Songs"
+                    for root, dirs, files in os.walk(songs_dir):
+                        for file in files:
+                            if file.endswith(".osu"):
+                                full_path = os.path.join(root, file)
+                                objs = parse_osu_file(full_path, mode="mania")
+                                if objs:  # Use first valid map file found
+                                    parsed_objects = objs
+                                    map_file = full_path
+                                    break
+                        if parsed_objects:
+                            break
+
+                if not parsed_objects:
+                    print("[main] No valid .osu files found - waiting for map to load...")
+                    print("[main] Tip: Use --map /path/to/file.osu to specify a map")
                     time.sleep(1.0)
                     continue
 
-                # Derive column count from the hit-object data itself - more reliable
-                # than chasing the headers pointer (which on this build returns OD/HP,
-                # not CS).
-                col_count_obj = max(o.column for o in objects) + 1
+                print(f"[main] Loaded map: {os.path.basename(map_file)}")
+
+                # Convert OsuHitObject to HitObject for mania
+                objects: List[HitObject] = []
+                for pobj in parsed_objects:
+                    # x field contains column index for mania
+                    column = int(pobj.x)
+                    obj = HitObject(
+                        start_time=pobj.time,
+                        end_time=pobj.time,  # Will be updated for sliders
+                        column=column,
+                    )
+                    objects.append(obj)
+
+                # Derive column count from the hit-object data
+                col_count = max((o.column for o in objects), default=3) + 1
 
                 col_dist = {}
                 for o in objects:
                     col_dist[o.column] = col_dist.get(o.column, 0) + 1
                 print(
-                    f"[main] columns:  memory={col_count_mem}  objects={col_count_obj}  "
+                    f"[main] {col_count}K mode  |  {len(objects)} objects  |  "
                     f"distribution={sorted(col_dist.items())}"
                 )
-
-                # Prefer whichever source reports more keys - defends against either
-                # the memory chain (returns wrong field) or a map that happens to
-                # have no notes in the rightmost column on the very first chart.
-                col_count = max(col_count_mem, col_count_obj)
 
                 # Resolve key layout
                 if args.keys:

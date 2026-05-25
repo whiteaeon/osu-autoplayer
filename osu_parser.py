@@ -53,11 +53,29 @@ def find_current_map_file(songs_dir: str) -> Optional[str]:
         return None
 
 
-def parse_osu_file(filepath: str) -> List[OsuHitObject]:
+def get_key_count(filepath: str) -> int:
+    """Extract the key count from the Difficulty section of a mania beatmap."""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        # Find CircleSize (CS) - for mania, this is the key count
+        match = re.search(r'CircleSize\s*:\s*(\d+(?:\.\d+)?)', content)
+        if match:
+            cs = float(match.group(1))
+            return int(cs)
+    except:
+        pass
+
+    return 4  # Default to 4K if not found
+
+
+def parse_osu_file(filepath: str, mode: str = "standard") -> List[OsuHitObject]:
     """
     Parse a .osu file and extract hit objects.
 
-    Returns a list of OsuHitObject with x, y, time, and kind.
+    For standard mode: Returns x, y coordinates (0-512, 0-384)
+    For mania mode: Returns column index and time
     """
     objects = []
 
@@ -67,6 +85,9 @@ def parse_osu_file(filepath: str) -> List[OsuHitObject]:
     except Exception as e:
         print(f"[osu_parser] Error reading {filepath}: {e}")
         return []
+
+    # Get key count for mania mode
+    key_count = get_key_count(filepath) if mode == "mania" else 0
 
     # Find the [HitObjects] section
     match = re.search(r'\[HitObjects\](.*?)(?:\[|$)', content, re.DOTALL | re.IGNORECASE)
@@ -104,20 +125,20 @@ def parse_osu_file(filepath: str) -> List[OsuHitObject]:
             else:
                 continue
 
-            # For sliders, try to extract end time
-            duration = 0
-            if kind == 1 and len(parts) >= 6:
-                # Slider format: x,y,time,type,hitSound,curveData,slides,length[,edgeSounds][,edgeSets]
-                # The length (5th param) tells us the slider duration
-                try:
-                    # If there's a 7th field (slides count), multiply by something
-                    # For now, estimate from typical slider properties
-                    # We'll read the actual end time from memory instead
-                    pass
-                except:
-                    pass
+            # For mania mode, convert x coordinate to column
+            if mode == "mania":
+                # Mania column ranges: 0-51 = col0, 52-103 = col1, etc.
+                # 512 / key_count pixels per column
+                pixels_per_column = 512.0 / key_count if key_count > 0 else 512.0
+                column = int(x / pixels_per_column)
+                column = max(0, min(column, key_count - 1))  # Clamp to valid range
 
-            obj = OsuHitObject(x=x, y=y, time=time, kind=kind, duration=duration)
+                # For mania, store column in x field (will be used as HitObject.column)
+                obj = OsuHitObject(x=float(column), y=y, time=time, kind=kind, duration=0)
+            else:
+                # Standard mode: keep x, y as coordinates
+                obj = OsuHitObject(x=x, y=y, time=time, kind=kind, duration=0)
+
             objects.append(obj)
 
         except (ValueError, IndexError) as e:
