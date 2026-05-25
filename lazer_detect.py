@@ -196,40 +196,65 @@ def get_current_beatmap_file(stable_songs_dir: str = None) -> Optional[str]:
     return None
 
 
-def wait_for_gameplay_start(timeout: float = 30.0) -> bool:
+def wait_for_gameplay_start(timeout: float = 60.0) -> bool:
     """
-    Wait for osu! to enter gameplay state by detecting CPU usage spike.
-    Returns True if gameplay detected, False on timeout.
+    Wait for osu! gameplay to start by monitoring audio peak level.
 
-    Lazer uses more CPU during gameplay vs menu/select screens.
+    When gameplay starts, the song audio is louder than menu/preview audio.
+    Watches for a sustained audio level above baseline.
     """
-    osu_proc = None
-    for proc in psutil.process_iter(['name', 'pid']):
-        if 'osu' in proc.info['name'].lower():
-            osu_proc = psutil.Process(proc.info['pid'])
-            break
-
-    if not osu_proc:
-        return False
-
-    # Baseline CPU usage from current state (presumably menu/select)
-    baseline_samples = []
-    for _ in range(5):
-        cpu = osu_proc.cpu_percent(interval=0.2)
-        baseline_samples.append(cpu)
-
-    baseline = sum(baseline_samples) / len(baseline_samples)
-    threshold = baseline + 15.0  # Gameplay typically uses 15%+ more CPU
-    print(f"[lazer_detect] Baseline CPU: {baseline:.1f}%, threshold: {threshold:.1f}%")
-    print(f"[lazer_detect] Waiting for gameplay (press PLAY in osu! now)...")
-
     import time
+    try:
+        from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+    except ImportError:
+        print("[lazer_detect] pycaw not installed - falling back to manual prompt")
+        input("[lazer_detect] Press ENTER after starting the map in osu!: ")
+        return True
+
+    # Find osu's audio meter
+    meter = None
+    for s in AudioUtilities.GetAllSessions():
+        try:
+            if s.Process and 'osu' in s.Process.name().lower():
+                meter = s._ctl.QueryInterface(IAudioMeterInformation)
+                break
+        except:
+            pass
+
+    if not meter:
+        print("[lazer_detect] No osu audio session found - falling back to manual prompt")
+        input("[lazer_detect] Press ENTER after starting the map in osu!: ")
+        return True
+
+    # Measure baseline audio level for 1.5 seconds
+    print(f"[lazer_detect] Measuring baseline audio level (don't press play yet)...")
+    baseline_samples = []
+    for _ in range(15):
+        baseline_samples.append(meter.GetPeakValue())
+        time.sleep(0.1)
+    baseline = sum(baseline_samples) / len(baseline_samples)
+
+    # Threshold: needs to be louder than baseline by significant margin
+    # Gameplay audio is typically much louder than menu music
+    threshold = max(baseline * 2.0, 0.25)
+    print(f"[lazer_detect] Baseline audio: {baseline:.3f}, threshold: {threshold:.3f}")
+    print(f"[lazer_detect] Press PLAY in osu! now to start autoplayer...")
+
+    # Wait for sustained high audio level (>500ms above threshold)
     deadline = time.perf_counter() + timeout
+    high_count = 0
+    required_high = 5  # 500ms of sustained high audio
+
     while time.perf_counter() < deadline:
-        cpu = osu_proc.cpu_percent(interval=0.1)
-        if cpu > threshold:
-            print(f"[lazer_detect] Gameplay detected! (CPU: {cpu:.1f}%)")
-            return True
+        peak = meter.GetPeakValue()
+        if peak > threshold:
+            high_count += 1
+            if high_count >= required_high:
+                print(f"[lazer_detect] Gameplay detected! (peak: {peak:.3f})")
+                return True
+        else:
+            high_count = 0
+        time.sleep(0.1)
 
     print("[lazer_detect] Timeout waiting for gameplay")
     return False
