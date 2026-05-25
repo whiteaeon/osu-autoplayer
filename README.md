@@ -4,13 +4,17 @@ A **memory-based rhythm game autoplayer** for osu! that reads hit objects and ti
 
 ## What This Does
 
-Instead of reading beatmap files (like most bots), this plays maps by:
-1. **Memory scanning** the running osu! process to extract real-time game state
-2. **Hit object detection** with sub-millisecond timing precision
-3. **Humanized input generation** — no robotic perfection, but realistic variance
+**Hybrid approach for maximum compatibility:**
+1. **Hit objects from .osu files** — Parse beatmap files for 100% reliable hit detection (works in osu!lazer)
+2. **Game timing from memory** — Sync playback with actual game clock for perfect timing
+3. **Humanized input generation** — No robotic perfection, but realistic variance
 4. **Dual-mode support** for both **mania** (keys) and **standard** (mouse) modes
 
 Think of it as a "perfect player with flaws" — it hits notes accurately but with natural timing jitter, late lapses, and aim inaccuracy.
+
+**Works with:**
+- ✅ **osu!lazer** (main focus)
+- ✅ **osu! stable** (legacy support)
 
 ## Features
 
@@ -37,36 +41,42 @@ Think of it as a "perfect player with flaws" — it hits notes accurately but wi
 - **Late lapses** — occasional 10-24ms delays (simulates human fatigue)
 - **Speed mod support** — DT/NC (1.5x), HT (0.75x)
 
-## How It Works
+## How It Works (Hybrid Approach)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ osu! process running                                    │
-│  ├─ Game memory (hit objects, timing, status)          │
-│  └─ .osu file (map metadata, coordinates)              │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│ Memory Scanning (VirtualQueryEx signature scanning)     │
-│  ├─ Find hit object list in executable regions         │
-│  ├─ Read timing: obj + 0x10 (start_time), 0x14 (end)   │
-│  └─ Mania: obj + 0x9C (column), Standard: 0x90 (x), 0x8C (y) │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│ Humanization (timing variance, aim error, late lapses) │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│ Action Generation (press/release/click/move events)    │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│ Input Simulation (pydirectinput: keys or mouse)        │
-│  ├─ Mania: keyDown(key), keyUp(key)                    │
-│  └─ Standard: moveTo(x, y), click()                    │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────┐         ┌──────────────────────────────┐
+│ .osu File (beatmap)                  │         │ osu! Game Process            │
+│  ├─ [Difficulty] → key count (mania) │         │  ├─ Game memory              │
+│  ├─ [HitObjects] → coordinates       │         │  └─ Current playback time    │
+│  └─ [TimingPoints] → BPM             │         └──────────────────────────────┘
+└──────────────────────────────────────┘                      ↓
+         ↓                                      ┌──────────────────────────────┐
+┌──────────────────────────────────────┐       │ Memory Scanning              │
+│ .osu File Parser                     │       │  ├─ Find game time address   │
+│  ├─ Parse [HitObjects] section       │       │  └─ Poll current playback ms │
+│  ├─ Extract x,y (standard) or x→col  │       └──────────────────────────────┘
+│  │  (mania)                          │                      ↓
+│  └─ Get timing (always from file)    │       ┌──────────────────────────────┐
+└──────────────────────────────────────┘       │ Sync Hit Objects with Time   │
+         ↓                                      │  ├─ Match file times to      │
+┌──────────────────────────────────────┐       │  │  game clock              │
+│ Humanization (timing variance)       │       │  └─ Convert to actions      │
+│  ├─ Gaussian jitter                  │       └──────────────────────────────┘
+│  ├─ Late lapses                      │                      ↓
+│  └─ Chord splay                      │       ┌──────────────────────────────┐
+└──────────────────────────────────────┘       │ Input Simulation            │
+         ↓                                      │  ├─ Key presses (mania)     │
+┌──────────────────────────────────────┐       │  └─ Mouse moves (standard)  │
+│ Action Generation                    │       └──────────────────────────────┘
+│  ├─ Press/release actions (mania)    │
+│  └─ Move/click actions (standard)    │
+└──────────────────────────────────────┘
 ```
+
+**Why Hybrid?**
+- **File parsing**: 100% reliable, works across game updates, no memory scanning needed
+- **Memory timing**: Ensures playback sync with game's actual audio clock
+- **Best of both**: No more memory offset hunting!
 
 ## Installation
 
@@ -128,43 +138,32 @@ python main.py --offset -20  # Press 20ms earlier
 
 ## Technical Details
 
-### Memory Layout (osu! stable)
-**Hit Object Structure:**
-```
-offset   type      meaning
-0x10     int32     start_time (milliseconds)
-0x14     int32     end_time (ms) — equals start for circles/taps
-0x88     float32   [mania] x position? [standard] unused
-0x90     float32   [standard] x coordinate (0-512)
-0x8C     float32   y coordinate (0-384)
-0x9C     int32     kind (0=circle, 1=slider, 2=spinner, [mania] column)
-```
+### Hybrid Architecture
 
-**Player State Chain:**
-```
-player_pointer
-  ↓ + 0x48
-hit_manager
-  ↓ + 0x48
-list_container
-  ├─ + 0x04 → content_ptr (array of hit object pointers)
-  ├─ + 0x0C → size (number of objects)
-  └─ + 0x08 → content[i] (individual object pointer)
-```
-
-### Signature Scanning
-Uses regex-based pattern matching to find memory addresses across all JIT-compiled executable regions, surviving osu! updates that shuffle .NET heap addresses.
-
-### .osu File Parsing
+**1. .osu File Parsing (Hit Objects)**
 Standard beatmap file format:
 ```
 [HitObjects]
 x,y,time,type,hitSound,objectParams
 256,192,1000,1,0,B|300|200|200|150,2,50
 ```
-- `type & 1` = circle
-- `type & 2` = slider  
-- `type & 8` = spinner
+- **Standard mode**: x,y = screen coordinates (0-512, 0-384)
+- **Mania mode**: x → column index (based on key count from CircleSize)
+- `type & 1` = circle, `type & 2` = slider, `type & 8` = spinner
+
+**2. Memory Scanning (Game Time Only)**
+For osu!lazer and stable, we scan for:
+- Game time address (current playback position in ms)
+- Game status (playing/stopped/paused)
+
+Signature scanning handles game updates automatically — no hardcoded offsets.
+
+### Why Not Pure Memory Reading?
+Memory layout is different between osu! stable and lazer, and lazer changes frequently. The hybrid approach:
+- ✅ Works with both stable and lazer
+- ✅ Survives game updates  
+- ✅ No memory offset hunting
+- ❌ Requires .osu files (always present when playing)
 
 ## Debugging
 
@@ -183,10 +182,10 @@ print(f"[play] Action {i}: {a}")
 ## Limitations
 
 - **Windows only** (memory reading is OS-specific)
-- **osu! stable only** (lazer uses different memory layout)
-- **Fullscreen required** (for accurate mouse coordinates)
-- **No slider curve simulation yet** (standard mode)
-- **No spinner handling** (skipped)
+- **Fullscreen mode** required (for accurate cursor positioning in standard mode)
+- **No slider curve simulation yet** (standard mode uses linear interpolation)
+- **No spinner handling** (spinners are skipped in both modes)
+- **Requires .osu files** (beatmaps must be downloaded/cached)
 
 ## Disclaimer
 
