@@ -32,6 +32,7 @@ from typing import List
 from osu_memory import OsuMemory, HitObject, HitObjectStandard
 from osu_parser import get_hit_objects_from_map, OsuHitObject, parse_osu_file, get_game_mode
 from lazer_detect import get_current_beatmap_file, get_osu_window_title, wait_for_gameplay_start
+from tosu_client import TosuClient
 from input_simulator import InputSimulator
 
 # ---------------------------------------------------------------------------
@@ -724,13 +725,21 @@ def main() -> None:
         args.tap_min = args.tap_max = 20
 
     print("=" * 50)
-    print("  osu! mania Autoplayer  (memory mode)")
+    print("  osu! Autoplayer  (tosu/hybrid mode)")
     print("=" * 50)
     print()
 
-    mem = OsuMemory()
-    if not mem.connect():
-        sys.exit(1)
+    # Try tosu first (works with both lazer and stable)
+    tosu = TosuClient()
+    if tosu.is_available():
+        print(f"[tosu] Connected. Client: {tosu.get_client_type()}")
+        mem = tosu  # Use tosu as the memory interface (drop-in compatible)
+    else:
+        print("[tosu] Not running. Falling back to memory scanning (stable only).")
+        print("[tosu] For lazer support, run tosu.exe from https://github.com/tosuapp/tosu")
+        mem = OsuMemory()
+        if not mem.connect():
+            sys.exit(1)
 
     if args.robot:
         print("\n[main] ROBOT MODE - perfect timing\n")
@@ -774,19 +783,28 @@ def main() -> None:
                         time.sleep(1.0)
                         continue
                 else:
-                    # Auto-detect via window title (works with lazer)
-                    detected_file = get_current_beatmap_file("D:\\gms\\osu!\\Songs")
-                    if detected_file:
-                        if get_game_mode(detected_file) != "standard":
+                    # Auto-detect using tosu (or fallback to window title)
+                    detected_file = None
+                    if isinstance(mem, TosuClient):
+                        detected_file = mem.get_current_map_file()
+                        # Verify game mode matches
+                        if detected_file and mem.get_game_mode() != "standard":
+                            print(f"[main] Map is not standard mode (mode={mem.get_game_mode()}), waiting...")
+                            time.sleep(1.0)
+                            continue
+                    else:
+                        detected_file = get_current_beatmap_file("D:\\gms\\osu!\\Songs")
+                        if detected_file and get_game_mode(detected_file) != "standard":
                             print(f"[main] Map is not standard mode, waiting...")
                             time.sleep(1.0)
                             continue
+
+                    if detected_file:
                         parsed_objects = parse_osu_file(detected_file)
                         map_file = detected_file
 
                 if not parsed_objects:
                     print("[main] No standard mode map detected - waiting...")
-                    print("[main] Tip: Make sure osu! is showing a standard map, or use --map")
                     time.sleep(1.0)
                     continue
 
@@ -841,12 +859,19 @@ def main() -> None:
                 )
 
                 print(f"[main] Ready to play {len(actions)} actions")
-                # Auto-detect when gameplay starts via CPU monitoring
-                if wait_for_gameplay_start(timeout=60.0):
-                    mem.reset_play_clock()  # Sync clock to gameplay start
-                    play(mem, actions, sim, mode="standard")
+                # Wait for gameplay to start
+                if isinstance(mem, TosuClient):
+                    # Use tosu's exact state detection
+                    print("[main] Waiting for gameplay to start in osu!...")
+                    while not mem.is_playing():
+                        time.sleep(0.05)
+                    print(f"[main] Gameplay started at {mem.get_game_time()}ms")
                 else:
-                    print("[main] No gameplay detected, skipping...")
+                    if not wait_for_gameplay_start(timeout=60.0):
+                        print("[main] No gameplay detected, skipping...")
+                        continue
+                    mem.reset_play_clock()
+                play(mem, actions, sim, mode="standard")
                 print("[main] Map ended.\n")
                 time.sleep(1.0)
 
@@ -865,19 +890,27 @@ def main() -> None:
                         time.sleep(1.0)
                         continue
                 else:
-                    # Auto-detect via window title (works with lazer)
-                    detected_file = get_current_beatmap_file("D:\\gms\\osu!\\Songs")
-                    if detected_file:
-                        if get_game_mode(detected_file) != "mania":
+                    # Auto-detect using tosu (or fallback to window title)
+                    detected_file = None
+                    if isinstance(mem, TosuClient):
+                        detected_file = mem.get_current_map_file()
+                        if detected_file and mem.get_game_mode() != "mania":
+                            print(f"[main] Map is not mania mode (mode={mem.get_game_mode()}), waiting...")
+                            time.sleep(1.0)
+                            continue
+                    else:
+                        detected_file = get_current_beatmap_file("D:\\gms\\osu!\\Songs")
+                        if detected_file and get_game_mode(detected_file) != "mania":
                             print(f"[main] Map is not mania mode, waiting...")
                             time.sleep(1.0)
                             continue
+
+                    if detected_file:
                         parsed_objects = parse_osu_file(detected_file, mode="mania")
                         map_file = detected_file
 
                 if not parsed_objects:
                     print("[main] No mania map detected - waiting...")
-                    print("[main] Tip: Make sure osu! is showing a mania map, or use --map")
                     time.sleep(1.0)
                     continue
 
@@ -964,12 +997,19 @@ def main() -> None:
                     print(f"[main] break-taps:  {actions_before} actions -> {actions_after} actions")
 
                 print(f"[main] Ready to play {len(actions)} actions")
-                # Auto-detect when gameplay starts via CPU monitoring
-                if wait_for_gameplay_start(timeout=60.0):
-                    mem.reset_play_clock()  # Sync clock to gameplay start
-                    play(mem, actions, sim, mode="mania")
+                # Wait for gameplay to start
+                if isinstance(mem, TosuClient):
+                    print("[main] Waiting for gameplay to start in osu!...")
+                    while not mem.is_playing():
+                        time.sleep(0.05)
+                    print(f"[main] Gameplay started at {mem.get_game_time()}ms")
                 else:
-                    print("[main] No gameplay detected, skipping...")
+                    if not wait_for_gameplay_start(timeout=60.0):
+                        print("[main] No gameplay detected, skipping...")
+                        continue
+                    mem.reset_play_clock()
+
+                play(mem, actions, sim, mode="mania")
 
                 print("[main] Map ended.\n")
                 time.sleep(1.0)
