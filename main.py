@@ -454,9 +454,10 @@ def to_actions_standard(
         elif obj.kind == 1:  # Slider
             end_time = int(obj.end_time / speed_multiplier) + offset_ms
 
-            # Move to start and hold down
+            # Move to start, hold, then release at end - stay at start position
+            # TODO: Implement proper slider curve following (needs Bezier parsing)
             actions.append(ActionStandard(
-                time=start_time,
+                time=start_time - 5,
                 x=obj.x,
                 y=obj.y,
                 mouse_action="move"
@@ -467,25 +468,7 @@ def to_actions_standard(
                 y=obj.y,
                 mouse_action="hold_start"
             ))
-
-            # TODO: Generate curve path (Bézier) - for now just move to end
-            # In a full implementation, would read slider curve points from memory
-            # and generate smooth interpolated path
-            step_ms = 10
-            steps = max(1, (end_time - start_time) // step_ms)
-            for i in range(1, steps):
-                t = i / steps
-                # Linear interpolation (simplified - full version needs Bézier)
-                x = obj.x + (0 - obj.x) * t  # Placeholder: no end position
-                y = obj.y + (0 - obj.y) * t
-                actions.append(ActionStandard(
-                    time=start_time + i * step_ms,
-                    x=x,
-                    y=y,
-                    mouse_action="move"
-                ))
-
-            # Release mouse button at end
+            # Release at end (no intermediate moves - stay at start position)
             actions.append(ActionStandard(
                 time=end_time,
                 x=obj.x,
