@@ -254,11 +254,15 @@ class OsuMemory:
     def get_game_time(self) -> int:
         """Current song position in milliseconds (osu!'s internal clock)."""
         if self._time_address == 0:
-            # Fallback for lazer: return system time (not ideal, but allows hybrid mode to work)
-            if not hasattr(self, '_play_start_time'):
+            # Fallback for lazer: return system time
+            if not hasattr(self, '_play_start_time') or self._play_start_time is None:
                 self._play_start_time = time.perf_counter()
             return int((time.perf_counter() - self._play_start_time) * 1000)
         return self._int(self._time_address)
+
+    def reset_play_clock(self):
+        """Reset the system clock fallback. Call when starting a new play session."""
+        self._play_start_time = time.perf_counter()
 
     def get_status(self) -> int:
         """Game state: 0=menu, 2=playing, 5=song select."""

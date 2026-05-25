@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import List
 
 from osu_memory import OsuMemory, HitObject, HitObjectStandard
-from osu_parser import get_hit_objects_from_map, OsuHitObject, parse_osu_file
+from osu_parser import get_hit_objects_from_map, OsuHitObject, parse_osu_file, get_game_mode
 from input_simulator import InputSimulator
 
 # ---------------------------------------------------------------------------
@@ -773,12 +773,15 @@ def main() -> None:
                         time.sleep(1.0)
                         continue
                 else:
-                    # Auto-detect: scan for .osu files
+                    # Auto-detect: scan for .osu files matching standard mode
                     songs_dir = "D:\\gms\\osu!\\Songs"
                     for root, dirs, files in os.walk(songs_dir):
                         for file in files:
                             if file.endswith(".osu"):
                                 full_path = os.path.join(root, file)
+                                # Only load standard mode maps
+                                if get_game_mode(full_path) != "standard":
+                                    continue
                                 objs = parse_osu_file(full_path)
                                 if objs:  # Use first valid map file found
                                     parsed_objects = objs
@@ -788,7 +791,7 @@ def main() -> None:
                             break
 
                 if not parsed_objects:
-                    print("[main] No valid .osu files found - waiting for map to load...")
+                    print("[main] No valid standard mode .osu files found - waiting...")
                     print("[main] Tip: Use --map /path/to/file.osu to specify a map")
                     time.sleep(1.0)
                     continue
@@ -843,7 +846,10 @@ def main() -> None:
                     aim_accuracy_px=aim_accuracy,
                 )
 
-                print(f"[main] Ready to play {len(actions)} actions\n")
+                print(f"[main] Ready to play {len(actions)} actions")
+                print("[main] *** Press ENTER in osu! when the map starts to sync timing ***")
+                input("[main] Press ENTER here to start autoplayer: ")
+                mem.reset_play_clock()  # Reset system clock for new session
                 play(mem, actions, sim, mode="standard")
                 print("[main] Map ended.\n")
                 time.sleep(1.0)
@@ -863,12 +869,15 @@ def main() -> None:
                         time.sleep(1.0)
                         continue
                 else:
-                    # Auto-detect: scan for .osu files
+                    # Auto-detect: scan for .osu files matching mania mode
                     songs_dir = "D:\\gms\\osu!\\Songs"
                     for root, dirs, files in os.walk(songs_dir):
                         for file in files:
                             if file.endswith(".osu"):
                                 full_path = os.path.join(root, file)
+                                # Only load mania mode maps
+                                if get_game_mode(full_path) != "mania":
+                                    continue
                                 objs = parse_osu_file(full_path, mode="mania")
                                 if objs:  # Use first valid map file found
                                     parsed_objects = objs
@@ -878,7 +887,7 @@ def main() -> None:
                             break
 
                 if not parsed_objects:
-                    print("[main] No valid .osu files found - waiting for map to load...")
+                    print("[main] No valid mania .osu files found - waiting...")
                     print("[main] Tip: Use --map /path/to/file.osu to specify a map")
                     time.sleep(1.0)
                     continue
@@ -965,7 +974,10 @@ def main() -> None:
                     actions_after = len(actions)
                     print(f"[main] break-taps:  {actions_before} actions -> {actions_after} actions")
 
-                print(f"[main] Ready to play {len(actions)} actions\n")
+                print(f"[main] Ready to play {len(actions)} actions")
+                print("[main] *** Press ENTER in osu! when the map starts to sync timing ***")
+                input("[main] Press ENTER here to start autoplayer: ")
+                mem.reset_play_clock()  # Reset system clock for new session
 
                 play(mem, actions, sim, mode="mania")
 

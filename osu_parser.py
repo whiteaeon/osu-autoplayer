@@ -53,6 +53,25 @@ def find_current_map_file(songs_dir: str) -> Optional[str]:
         return None
 
 
+def get_game_mode(filepath: str) -> str:
+    """Extract the game mode from the .osu file.
+    Returns: 'standard', 'taiko', 'catch', 'mania'
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        # Find Mode in [General] section
+        match = re.search(r'Mode\s*:\s*(\d+)', content)
+        if match:
+            mode_id = int(match.group(1))
+            modes = {0: "standard", 1: "taiko", 2: "catch", 3: "mania"}
+            return modes.get(mode_id, "standard")
+    except:
+        pass
+    return "standard"
+
+
 def get_key_count(filepath: str) -> int:
     """Extract the key count from the Difficulty section of a mania beatmap."""
     try:
